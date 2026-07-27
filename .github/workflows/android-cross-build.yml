@@ -1,0 +1,200 @@
+name: better-sqlite3 Android Cross Build
+
+# Cross-compiles better-sqlite3 (a Node-API / node-addon-api addon) into an
+# Android .node for arm64-v8a and x86_64. The addon plus its bundled SQLite
+# amalgamation are built with the Android NDK clang++/libc++ toolchain and
+# linked directly against the prebuilt Javet Node runtime shared library
+# (libjavet-node-android-i18n.v.5.0.10.so), which exports the full napi_* /
+# node_api_* C ABI. Linking against it lets -Wl,--no-undefined verify at link
+# time that every N-API symbol resolves. Node.js 24.18.0 headers + the matching
+# node-addon-api headers are fetched via npm/node-gyp.
+#
+# The Javet .so ships (zipped, libs/<abi>/ layout inside) from the isolated-vm
+# repo to avoid duplicating a 90MB blob here.
+
+on:
+  push:
+    tags: ['*']
+  workflow_dispatch:
+    inputs:
+      node_version:
+        description: 'Node.js version (headers) for the Android build'
+        required: false
+        default: '24.18.0'
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: ${{ github.event.inputs.node_version || '24.18.0' }}
+  NDK_VERSION: r27d
+  ANDROID_API: '24'
+  JAVET_SO: libjavet-node-android-i18n.v.5.0.10.so
+  # Zipped Javet runtime .so bundle (libs/<abi>/<so> layout inside).
+  JAVET_SO_ZIP_URL: https://raw.githubusercontent.com/anonyein/isolated-vm/main/libjavet-node-android-i18n.v.5.0.10.zip
+
+jobs:
+  cross-build:
+    name: better-sqlite3 .node for ${{ matrix.abi }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            abi: arm64-v8a
+            triple: aarch64-linux-android
+            gyp_arch: arm64
+            prebuild_name: android-arm64
+          - arch: x86_64
+            abi: x86_64
+            triple: x86_64-linux-android
+            gyp_arch: x64
+            prebuild_name: android-x64
+    steps:
+      - name: Checkout better-sqlite3 source
+        uses: actions/checkout@v7
+
+      - name: Download & extract bundled Javet .so
+        run: |
+          set -eux
+          curl -fL -o javet-so.zip "${{ env.JAVET_SO_ZIP_URL }}"
+          unzip -o javet-so.zip
+          test -f "libs/${{ matrix.abi }}/${{ env.JAVET_SO }}"
+          ls -lh "libs/${{ matrix.abi }}/${{ env.JAVET_SO }}"
+
+      - name: Setup Node.js (host, drives node-gyp)
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install setuptools + node-gyp
+        run: |
+          python3 -m pip install setuptools
+          npm install --global node-gyp@latest
+
+      - name: Install JS deps (node-addon-api headers)
+        run: npm install --ignore-scripts
+
+      - name: Setup Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          local-cache: false
+
+      - name: Fetch Node.js headers (${{ env.NODE_VERSION }})
+        run: node-gyp install ${{ env.NODE_VERSION }}
+
+      - name: Patch binding.gyp for Android link target
+        env:
+          IV_ANDROID_ABI: ${{ matrix.abi }}
+          IV_ANDROID_SO: ${{ env.JAVET_SO }}
+        run: python3 .github/workflows/_patch-binding-android.py
+
+      - name: Cross-compile & link better_sqlite3.node
+        env:
+          NDK: ${{ steps.ndk.outputs.ndk-path }}
+          TRIPLE: ${{ matrix.triple }}
+          API: ${{ env.ANDROID_API }}
+          GYP_ARCH: ${{ matrix.gyp_arch }}
+        run: |
+          set -eux
+          HOST_TAG=linux-x86_64
+          TOOL="$NDK/toolchains/llvm/prebuilt/$HOST_TAG/bin"
+          SYSROOT="$NDK/toolchains/llvm/prebuilt/$HOST_TAG/sysroot"
+
+          # NDK clang wrappers that bake in the target triple + API level.
+          export CC="$TOOL/${TRIPLE}${API}-clang"
+          export CXX="$TOOL/${TRIPLE}${API}-clang++"
+          export AR="$TOOL/llvm-ar"
+          export RANLIB="$TOOL/llvm-ranlib"
+          export STRIP="$TOOL/llvm-strip"
+          export LINK="$CXX"
+
+          export CFLAGS="--sysroot=$SYSROOT -fPIC"
+          export CXXFLAGS="--sysroot=$SYSROOT -fPIC"
+          export LDFLAGS="--sysroot=$SYSROOT"
+
+          # force_build=1 makes binding.gyp compile instead of short-circuiting
+          # on a host prebuild.
+          node-gyp configure \
+            --nodedir="$HOME/.cache/node-gyp/${NODE_VERSION}" \
+            --arch="$GYP_ARCH" \
+            -- -Dforce_build=1
+
+          node-gyp build \
+            --release \
+            CC.target="$CC" \
+            CXX.target="$CXX" \
+            CC.host="$CC" \
+            CXX.host="$CXX" \
+            LINK.target="$CXX" \
+            AR.target="$AR"
+
+      - name: Collect .node
+        run: |
+          set -eux
+          out="prebuilds/${{ matrix.prebuild_name }}"
+          mkdir -p "$out"
+          node_file="$(find build -name 'better_sqlite3.node' | head -n1)"
+          test -n "$node_file"
+          cp -v "$node_file" "$out/better_sqlite3.node"
+          file "$out/better_sqlite3.node"
+          ls -lh "$out"
+
+      - name: Zip per-abi
+        run: |
+          set -eux
+          zip -r "better-sqlite3-android-${{ matrix.abi }}-${{ env.NODE_VERSION }}.zip" \
+            "prebuilds/${{ matrix.prebuild_name }}"
+
+      - name: Upload per-abi artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: better-sqlite3-android-${{ matrix.abi }}
+          path: better-sqlite3-android-${{ matrix.abi }}-${{ env.NODE_VERSION }}.zip
+
+  pack:
+    name: Bundle + Release
+    needs: cross-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download per-abi artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: better-sqlite3-android-*
+          path: incoming
+
+      - name: Merge into prebuilds layout
+        run: |
+          set -eux
+          mkdir -p prebuilds
+          for z in $(find incoming -name '*.zip'); do
+            unzip -o "$z" -d merged
+          done
+          cp -a merged/prebuilds/. prebuilds/
+          find prebuilds -type f -name '*.node' -print
+
+      - name: Build merged zip
+        run: |
+          set -eux
+          zip -r "better-sqlite3-prebuilds-android-${{ env.NODE_VERSION }}.zip" prebuilds
+          ls -lh better-sqlite3-prebuilds-android-*.zip
+
+      - name: Upload merged artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: better-sqlite3-prebuilds-android
+          path: better-sqlite3-prebuilds-android-${{ env.NODE_VERSION }}.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: better-sqlite3-prebuilds-android-*.zip
