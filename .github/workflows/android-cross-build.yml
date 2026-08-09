@@ -4,9 +4,9 @@ name: better-sqlite3 Android Cross Build
 # Android .node for arm64-v8a and x86_64. The addon plus its bundled SQLite
 # amalgamation are built with the Android NDK clang++/libc++ toolchain and
 # linked directly against the prebuilt Javet Node runtime shared library
-# (libjavet-node-android-i18n.v.5.0.10.so), which exports the full napi_* /
+# (libjavet-node-android-i18n.v.5.0.11.so), which exports the full napi_* /
 # node_api_* C ABI. Linking against it lets -Wl,--no-undefined verify at link
-# time that every N-API symbol resolves. Node.js 24.18.0 headers + the matching
+# time that every N-API symbol resolves. Node.js 24.19.0 headers + the matching
 # node-addon-api headers are fetched via npm/node-gyp.
 #
 # The Javet .so ships (zipped, libs/<abi>/ layout inside) from the isolated-vm
@@ -20,18 +20,18 @@ on:
       node_version:
         description: 'Node.js version (headers) for the Android build'
         required: false
-        default: '24.18.0'
+        default: '24.19.0'
 
 permissions:
   contents: write
 
 env:
-  NODE_VERSION: ${{ github.event.inputs.node_version || '24.18.0' }}
+  NODE_VERSION: ${{ github.event.inputs.node_version || '24.19.0' }}
   NDK_VERSION: r27d
   ANDROID_API: '24'
-  JAVET_SO: libjavet-node-android-i18n.v.5.0.10.so
+  JAVET_SO: libjavet-node-android-i18n.v.5.0.11.so
   # Zipped Javet runtime .so bundle (libs/<abi>/<so> layout inside).
-  JAVET_SO_ZIP_URL: https://raw.githubusercontent.com/anonyein/isolated-vm/main/libjavet-node-android-i18n.v.5.0.10.zip
+  JAVET_SO_ZIP_URL: https://raw.githubusercontent.com/anonyein/isolated-vm/main/libjavet-node-android-i18n.v.5.0.11.zip
 
 jobs:
   cross-build:
