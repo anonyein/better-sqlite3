@@ -4,10 +4,10 @@ name: better-sqlite3 Android Cross Build
 # Android .node for arm64-v8a and x86_64. The addon plus its bundled SQLite
 # amalgamation are built with the Android NDK clang++/libc++ toolchain and
 # linked directly against the prebuilt Javet Node runtime shared library
-# (libjavet-node-android-i18n.v.6.0.1.so), which exports the full napi_* /
+# (libjavet-node-android-i18n.v.6.0.2.so), which exports the full napi_* /
 # node_api_* C ABI. Linking against it lets -Wl,--no-undefined verify at link
-# time that every N-API symbol resolves. Javet 6.0.1 embeds Node v26.9.0 (V8
-# 14.6.202.34, NODE_MODULE_VERSION 147), so 26.9.0 headers + the matching
+# time that every N-API symbol resolves. Javet 6.0.2 embeds Node v26.10.0 (V8
+# 14.6.202.34, NODE_MODULE_VERSION 147), so 26.10.0 headers + the matching
 # node-addon-api headers are fetched via npm/node-gyp.
 #
 # The Javet .so ships (zipped, libs/<abi>/ layout inside) from the isolated-vm
@@ -21,25 +21,25 @@ on:
   workflow_dispatch:
     inputs:
       node_version:
-        description: 'Node.js version (headers). Must match the Javet .so runtime (6.0.1 -> 26.9.0)'
+        description: 'Node.js version (headers). Must match the Javet .so runtime (6.0.2 -> 26.10.0)'
         required: false
-        default: '26.9.0'
+        default: '26.10.0'
 
 permissions:
   contents: write
 
 env:
-  # MUST match the Node version baked into the Javet .so below. Javet 6.0.1
-  # embeds Node v26.9.0 / V8 14.6.202.34 (NODE_MODULE_VERSION 147). Mismatched
+  # MUST match the Node version baked into the Javet .so below. Javet 6.0.2
+  # embeds Node v26.10.0 / V8 14.6.202.34 (NODE_MODULE_VERSION 147). Mismatched
   # headers link against the wrong node_api layout.
-  NODE_VERSION: ${{ github.event.inputs.node_version || '26.9.0' }}
+  NODE_VERSION: ${{ github.event.inputs.node_version || '26.10.0' }}
   NDK_VERSION: r27d
   ANDROID_API: '24'
-  JAVET_SO: libjavet-node-android-i18n.v.6.0.1.so
+  JAVET_SO: libjavet-node-android-i18n.v.6.0.2.so
   # Zipped Javet runtime .so bundle (libs/<abi>/<so> layout inside), published
   # per ABI as <prefix>-<abi>.zip because a single zip exceeded GitHub's 100MB
   # file limit.
-  JAVET_SO_ZIP_URL_PREFIX: https://raw.githubusercontent.com/anonyein/isolated-vm/main/libjavet-node-android-i18n.v.6.0.1
+  JAVET_SO_ZIP_URL_PREFIX: https://raw.githubusercontent.com/anonyein/isolated-vm/main/libjavet-node-android-i18n.v.6.0.2
 
 jobs:
   cross-build:
